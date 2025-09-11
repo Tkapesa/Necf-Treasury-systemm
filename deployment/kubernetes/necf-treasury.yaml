@@ -1,0 +1,318 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: necf-treasury
+  labels:
+    name: necf-treasury
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: necf-treasury-secrets
+  namespace: necf-treasury
+type: Opaque
+data:
+  # Base64 encoded values - replace with actual secrets
+  SECRET_KEY: YOUR_SECRET_KEY_BASE64_ENCODED
+  DATABASE_URL: YOUR_DATABASE_URL_BASE64_ENCODED
+  REDIS_URL: YOUR_REDIS_URL_BASE64_ENCODED
+  STORAGE_ACCESS_KEY: YOUR_STORAGE_ACCESS_KEY_BASE64_ENCODED
+  STORAGE_SECRET_KEY: YOUR_STORAGE_SECRET_KEY_BASE64_ENCODED
+  SMTP_PASSWORD: YOUR_SMTP_PASSWORD_BASE64_ENCODED
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: necf-treasury-config
+  namespace: necf-treasury
+data:
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  CORS_ORIGINS: "https://your-domain.com"
+  STORAGE_TYPE: "s3"
+  STORAGE_BUCKET: "necf-treasury-receipts"
+  STORAGE_REGION: "us-east-1"
+  SMTP_HOST: "smtp.gmail.com"
+  SMTP_PORT: "587"
+  SMTP_FROM: "noreply@necftreasury.org"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: necf-treasury-backend
+  namespace: necf-treasury
+  labels:
+    app: necf-treasury-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: necf-treasury-backend
+  template:
+    metadata:
+      labels:
+        app: necf-treasury-backend
+    spec:
+      containers:
+      - name: backend
+        image: ghcr.io/your-org/necf-treasury-backend:BACKEND_IMAGE_TAG
+        ports:
+        - containerPort: 8000
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: necf-treasury-secrets
+              key: SECRET_KEY
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: necf-treasury-secrets
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: necf-treasury-secrets
+              key: REDIS_URL
+        - name: STORAGE_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: necf-treasury-secrets
+              key: STORAGE_ACCESS_KEY
+        - name: STORAGE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: necf-treasury-secrets
+              key: STORAGE_SECRET_KEY
+        - name: SMTP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: necf-treasury-secrets
+              key: SMTP_PASSWORD
+        envFrom:
+        - configMapRef:
+            name: necf-treasury-config
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: storage
+          mountPath: /app/storage
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: necf-treasury-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: necf-treasury-backend-service
+  namespace: necf-treasury
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+  selector:
+    app: necf-treasury-backend
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: necf-treasury-frontend
+  namespace: necf-treasury
+  labels:
+    app: necf-treasury-frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: necf-treasury-frontend
+  template:
+    metadata:
+      labels:
+        app: necf-treasury-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: ghcr.io/your-org/necf-treasury-frontend:FRONTEND_IMAGE_TAG
+        ports:
+        - containerPort: 80
+        env:
+        - name: REACT_APP_API_URL
+          value: "https://api.necftreasury.org"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: necf-treasury-frontend-service
+  namespace: necf-treasury
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+  selector:
+    app: necf-treasury-frontend
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: necf-treasury-storage
+  namespace: necf-treasury
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: standard
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: necf-treasury-ingress
+  namespace: necf-treasury
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  tls:
+  - hosts:
+    - necftreasury.org
+    - api.necftreasury.org
+    secretName: necf-treasury-tls
+  rules:
+  - host: necftreasury.org
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: necf-treasury-frontend-service
+            port:
+              number: 80
+  - host: api.necftreasury.org
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: necf-treasury-backend-service
+            port:
+              number: 8000
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migration
+  namespace: necf-treasury
+spec:
+  template:
+    spec:
+      containers:
+      - name: migration
+        image: ghcr.io/your-org/necf-treasury-backend:BACKEND_IMAGE_TAG
+        command: ["alembic", "upgrade", "head"]
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: necf-treasury-secrets
+              key: DATABASE_URL
+        envFrom:
+        - configMapRef:
+            name: necf-treasury-config
+      restartPolicy: OnFailure
+  backoffLimit: 3
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: necf-treasury-backend-hpa
+  namespace: necf-treasury
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: necf-treasury-backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: necf-treasury-frontend-hpa
+  namespace: necf-treasury
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: necf-treasury-frontend
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70

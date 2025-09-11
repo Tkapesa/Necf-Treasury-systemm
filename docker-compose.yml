@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: church-treasury-db
+    environment:
+      POSTGRES_DB: church_treasury
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - church-treasury
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: church-treasury-api
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/church_treasury
+      - DEBUG=false
+      - ENVIRONMENT=production
+      - SECRET_KEY=your-production-secret-key-change-this
+      - BACKEND_CORS_ORIGINS=["http://localhost:3000","http://frontend:3000"]
+      - UPLOAD_DIR=/app/uploads
+      - USE_S3_STORAGE=false
+      - OCR_ENABLED=true
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - church-treasury
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=10)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: church-treasury-web
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_APP_NAME=Church Treasury
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - church-treasury
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Optional: pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: church-treasury-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@church.org
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "8080:80"
+    depends_on:
+      - postgres
+    networks:
+      - church-treasury
+    restart: unless-stopped
+    profiles:
+      - dev
+
+volumes:
+  postgres_data:
+    driver: local
+  backend_uploads:
+    driver: local
+
+networks:
+  church-treasury:
+    driver: bridge
+    name: church-treasury-network

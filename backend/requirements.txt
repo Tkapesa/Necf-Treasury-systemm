@@ -1,0 +1,56 @@
+# FastAPI and Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Database
+sqlmodel==0.0.14
+psycopg2-binary==2.9.9
+asyncpg==0.29.0
+alembic==1.12.1
+
+# Authentication and Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# Configuration and Environment
+pydantic==2.5.0
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+python-dateutil==2.8.2
+
+# File Storage
+aiofiles==23.2.1
+boto3==1.34.0
+botocore==1.34.0
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2
+
+# Development and Code Quality
+black==23.11.0
+isort==5.12.0
+flake8==6.1.0
+pre-commit==3.5.0
+
+# OCR/Image processing
+Pillow==10.3.0
+# Optional deep OCR (requires system packages: tesseract-ocr, poppler)
+# pytesseract==0.3.10
+# pdf2image==1.16.3
+
+# Optional Email Support
+# fastapi-mail==1.4.1
+
+# OCR Dependencies
+Pillow==10.1.0
+pytesseract==0.3.10
+pdf2image==1.16.3
+# Production WSGI Server
+gunicorn==21.2.0
+
+# Monitoring and Logging
+structlog==23.2.0

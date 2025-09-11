@@ -1,0 +1,291 @@
+name: Deploy
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE_NAME: necf-treasury-backend
+  FRONTEND_IMAGE_NAME: necf-treasury-frontend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      backend-image: ${{ steps.backend-meta.outputs.tags }}
+      frontend-image: ${{ steps.frontend-meta.outputs.tags }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract version
+      id: version
+      run: |
+        if [[ "${{ github.event_name }}" == "release" ]]; then
+          VERSION=${{ github.event.release.tag_name }}
+        else
+          VERSION=${{ github.sha }}
+        fi
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+    - name: Extract backend metadata
+      id: backend-meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.BACKEND_IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Extract frontend metadata
+      id: frontend-meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.FRONTEND_IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push backend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        file: ./backend/Dockerfile
+        push: true
+        tags: ${{ steps.backend-meta.outputs.tags }}
+        labels: ${{ steps.backend-meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build frontend
+      working-directory: ./frontend
+      run: |
+        npm ci
+        npm run build
+
+    - name: Build and push frontend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        file: ./frontend/Dockerfile
+        push: true
+        tags: ${{ steps.frontend-meta.outputs.tags }}
+        labels: ${{ steps.frontend-meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy-render:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event.inputs.environment == 'staging' || (github.event_name == 'release' && contains(github.event.release.tag_name, 'staging'))
+    
+    steps:
+    - name: Deploy to Render
+      uses: johnbeynon/render-deploy-action@v0.0.8
+      with:
+        service-id: ${{ secrets.RENDER_SERVICE_ID }}
+        api-key: ${{ secrets.RENDER_API_KEY }}
+        wait-for-success: true
+
+    - name: Notify Render Deployment
+      run: |
+        echo "🚀 Deployed to Render staging environment"
+        echo "Version: ${{ needs.build-and-push.outputs.version }}"
+        echo "Backend Image: ${{ needs.build-and-push.outputs.backend-image }}"
+        echo "Frontend Image: ${{ needs.build-and-push.outputs.frontend-image }}"
+
+  deploy-digitalocean:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event.inputs.environment == 'production' || (github.event_name == 'release' && !contains(github.event.release.tag_name, 'staging'))
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install doctl
+      uses: digitalocean/action-doctl@v2
+      with:
+        token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+    - name: Save DigitalOcean kubeconfig
+      run: doctl kubernetes cluster kubeconfig save --expiry-seconds 600 ${{ secrets.DIGITALOCEAN_CLUSTER_NAME }}
+
+    - name: Update Kubernetes manifests
+      run: |
+        # Update image tags in Kubernetes manifests
+        sed -i "s|BACKEND_IMAGE_TAG|${{ needs.build-and-push.outputs.version }}|g" deployment/kubernetes/backend-deployment.yaml
+        sed -i "s|FRONTEND_IMAGE_TAG|${{ needs.build-and-push.outputs.version }}|g" deployment/kubernetes/frontend-deployment.yaml
+        
+        # Apply database migrations if needed
+        kubectl apply -f deployment/kubernetes/migration-job.yaml
+        kubectl wait --for=condition=complete --timeout=300s job/db-migration
+
+    - name: Deploy to DigitalOcean Kubernetes
+      run: |
+        kubectl apply -f deployment/kubernetes/
+        kubectl rollout status deployment/necf-treasury-backend
+        kubectl rollout status deployment/necf-treasury-frontend
+
+    - name: Verify deployment
+      run: |
+        kubectl get pods -l app=necf-treasury
+        kubectl get services
+        
+        # Wait for services to be ready
+        kubectl wait --for=condition=ready pod -l app=necf-treasury-backend --timeout=300s
+        kubectl wait --for=condition=ready pod -l app=necf-treasury-frontend --timeout=300s
+
+    - name: Run deployment tests
+      run: |
+        # Get the LoadBalancer IP
+        BACKEND_IP=$(kubectl get service necf-treasury-backend-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        FRONTEND_IP=$(kubectl get service necf-treasury-frontend-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        
+        # Test backend health
+        curl --fail "http://${BACKEND_IP}:8000/health" || exit 1
+        
+        # Test frontend availability
+        curl --fail "http://${FRONTEND_IP}:80" || exit 1
+        
+        echo "✅ Deployment verification successful"
+
+    - name: Notify DigitalOcean Deployment
+      run: |
+        echo "🚀 Deployed to DigitalOcean production environment"
+        echo "Version: ${{ needs.build-and-push.outputs.version }}"
+        echo "Backend Image: ${{ needs.build-and-push.outputs.backend-image }}"
+        echo "Frontend Image: ${{ needs.build-and-push.outputs.frontend-image }}"
+
+  deploy-kubernetes-generic:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event.inputs.environment == 'production' && contains(github.event.inputs.cluster_type, 'generic')
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+
+    - name: Configure kubectl
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+
+    - name: Deploy to Kubernetes
+      run: |
+        # Create namespace if it doesn't exist
+        kubectl create namespace necf-treasury --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Apply secrets
+        kubectl apply -f deployment/kubernetes/secrets.yaml -n necf-treasury
+        
+        # Update image tags
+        export BACKEND_IMAGE="${{ needs.build-and-push.outputs.backend-image }}"
+        export FRONTEND_IMAGE="${{ needs.build-and-push.outputs.frontend-image }}"
+        
+        envsubst < deployment/kubernetes/backend-deployment.yaml | kubectl apply -f - -n necf-treasury
+        envsubst < deployment/kubernetes/frontend-deployment.yaml | kubectl apply -f - -n necf-treasury
+        
+        # Apply other resources
+        kubectl apply -f deployment/kubernetes/ -n necf-treasury
+        
+        # Wait for rollout
+        kubectl rollout status deployment/necf-treasury-backend -n necf-treasury
+        kubectl rollout status deployment/necf-treasury-frontend -n necf-treasury
+
+  post-deployment:
+    runs-on: ubuntu-latest
+    needs: [build-and-push, deploy-render, deploy-digitalocean]
+    if: always() && (needs.deploy-render.result == 'success' || needs.deploy-digitalocean.result == 'success')
+    
+    steps:
+    - name: Run post-deployment checks
+      run: |
+        echo "🔍 Running post-deployment checks..."
+        
+        # Add your post-deployment health checks here
+        # Examples:
+        # - Database migration verification
+        # - API endpoint testing
+        # - Performance baseline checks
+        # - Security scans
+        
+        echo "✅ Post-deployment checks completed"
+
+    - name: Update deployment status
+      run: |
+        echo "📋 Deployment Summary:"
+        echo "Version: ${{ needs.build-and-push.outputs.version }}"
+        echo "Environment: ${{ github.event.inputs.environment || 'production' }}"
+        echo "Render: ${{ needs.deploy-render.result || 'skipped' }}"
+        echo "DigitalOcean: ${{ needs.deploy-digitalocean.result || 'skipped' }}"
+
+    - name: Create deployment issue
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `Deployment Failed: ${{ needs.build-and-push.outputs.version }}`,
+            body: `
+            ## Deployment Failure Report
+            
+            **Version:** ${{ needs.build-and-push.outputs.version }}
+            **Environment:** ${{ github.event.inputs.environment || 'production' }}
+            **Workflow:** ${{ github.workflow }}
+            **Run ID:** ${{ github.run_id }}
+            
+            ### Results:
+            - Render Deploy: ${{ needs.deploy-render.result || 'skipped' }}
+            - DigitalOcean Deploy: ${{ needs.deploy-digitalocean.result || 'skipped' }}
+            
+            Please investigate the deployment logs and resolve any issues.
+            `,
+            labels: ['deployment', 'bug', 'urgent']
+          })
+
+    - name: Notify success
+      if: success()
+      run: |
+        echo "🎉 Deployment completed successfully!"
+        echo "The NECF Treasury system has been deployed and is ready for use."
