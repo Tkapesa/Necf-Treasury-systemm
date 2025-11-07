@@ -1,25 +1,23 @@
 /**
- * Professional Sidebar Navigation
+ * Professional FIXED Sidebar Navigation
  * 
- * Implements the clean sidebar design from the reference with collapsible navigation
+ * Modern fixed sidebar with glassmorphism and smooth animations
+ * Stays visible on desktop, slides in on mobile
  */
 
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  HomeIcon,
-  CreditCardIcon,
-  ReceiptIcon,
-  ArrowRightLeftIcon,
-  RepeatIcon,
-  CheckCircleIcon,
-  BarChart3Icon,
-  SettingsIcon,
-  ChevronDownIcon,
-  DollarSignIcon,
-  FileTextIcon,
-  UsersIcon
+  LayoutDashboard,
+  ChevronDown,
+  FileText,
+  Upload,
+  TrendingUp,
+  Wallet,
+  Settings,
+  HelpCircle,
+  Sparkles
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -34,12 +32,13 @@ interface NavigationItem {
   current?: boolean;
   children?: NavigationItem[];
   badge?: string | number;
+  badgeColor?: string;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const { user } = useAuth();
   const location = useLocation();
-  const [expandedItems, setExpandedItems] = useState<string[]>(['Cash management', 'Payments']);
+  const [expandedItems, setExpandedItems] = useState<string[]>([]);
 
   const toggleExpanded = (itemName: string) => {
     setExpandedItems(prev => 
@@ -55,96 +54,41 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
 
   const navigationItems: NavigationItem[] = [
     {
-      name: 'Home',
+      name: 'Dashboard',
       href: user?.role === 'admin' ? '/admin' : '/dashboard',
-      icon: <HomeIcon className="h-5 w-5" />,
+      icon: <LayoutDashboard className="h-5 w-5" />,
       current: isActive('/') || isActive('/admin') || isActive('/dashboard')
     },
     {
-      name: 'Cash Management',
-      icon: <DollarSignIcon className="h-5 w-5" />,
-      children: [
-        {
-          name: 'Receipts',
-          href: '/receipts',
-          icon: <ReceiptIcon className="h-4 w-4" />,
-          current: isActive('/receipts')
-        },
-        {
-          name: 'Upload Receipt',
-          href: '/receipts/upload',
-          icon: <FileTextIcon className="h-4 w-4" />,
-          current: isActive('/receipts/upload')
-        },
-        ...(user?.role === 'admin' ? [{
-          name: 'All Receipts',
-          href: '/admin/receipts',
-          icon: <ReceiptIcon className="h-4 w-4" />,
-          current: isActive('/admin/receipts')
-        }] : [])
-      ]
+      name: 'Upload Receipt',
+      href: '/receipts/upload',
+      icon: <Upload className="h-5 w-5" />,
+      current: isActive('/receipts/upload')
     },
-    {
-      name: 'Payments',
-      icon: <CreditCardIcon className="h-5 w-5" />,
-      children: [
-        {
-          name: 'Credit Transfers',
-          href: '/payments/transfers',
-          icon: <ArrowRightLeftIcon className="h-4 w-4" />,
-          current: isActive('/payments/transfers')
-        },
-        {
-          name: 'Direct Debits',
-          href: '/payments/debits',
-          icon: <ArrowRightLeftIcon className="h-4 w-4" />,
-          current: isActive('/payments/debits')
-        },
-        {
-          name: 'Mandates',
-          href: '/payments/mandates',
-          icon: <FileTextIcon className="h-4 w-4" />,
-          current: isActive('/payments/mandates')
-        },
-        {
-          name: 'Counterparties',
-          href: '/payments/counterparties',
-          icon: <UsersIcon className="h-4 w-4" />,
-          current: isActive('/payments/counterparties')
-        }
-      ]
-    },
-    {
-      name: 'Expected Transfers',
-      href: '/transfers/expected',
-      icon: <RepeatIcon className="h-5 w-5" />,
-      current: isActive('/transfers/expected')
-    },
-    {
-      name: 'Sweeping Rules',
-      href: '/rules/sweeping',
-      icon: <RepeatIcon className="h-5 w-5" />,
-      current: isActive('/rules/sweeping')
-    },
-    {
-      name: 'Approvals',
-      href: '/approvals',
-      icon: <CheckCircleIcon className="h-5 w-5" />,
-      current: isActive('/approvals')
-    },
-    {
-      name: 'Live Analytics',
-      href: '/admin/analytics',
-      icon: <BarChart3Icon className="h-5 w-5" />,
-      current: isActive('/admin/analytics'),
-      badge: 'LIVE'
-    },
-    {
-      name: 'Settings',
-      href: '/settings',
-      icon: <SettingsIcon className="h-5 w-5" />,
-      current: isActive('/settings')
-    }
+    ...(user?.role === 'admin' ? [
+      {
+        name: 'Live Analytics',
+        href: '/admin/analytics',
+        icon: <TrendingUp className="h-5 w-5" />,
+        current: isActive('/admin/analytics'),
+        badge: 'LIVE',
+        badgeColor: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+      },
+      {
+        name: 'Reports',
+        href: '/reports',
+        icon: <FileText className="h-5 w-5" />,
+        current: isActive('/reports')
+      },
+      {
+        name: 'Treasury',
+        href: '/treasury',
+        icon: <Wallet className="h-5 w-5" />,
+        current: isActive('/treasury'),
+        badge: 'NEW',
+        badgeColor: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300'
+      }
+    ] : [])
   ];
 
   const renderNavigationItem = (item: NavigationItem, level = 0) => {
@@ -152,8 +96,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     const isExpanded = expandedItems.includes(item.name);
     const isItemActive = item.current || (hasChildren && isChildActive(item.children!));
     
-    const paddingLeft = level === 0 ? 'pl-3' : 'pl-8';
-    const iconSize = level === 0 ? 'h-5 w-5' : 'h-4 w-4';
+    const paddingLeft = level === 0 ? 'pl-3' : 'pl-10';
 
     if (hasChildren) {
       return (
@@ -161,26 +104,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           <button
             onClick={() => toggleExpanded(item.name)}
             className={`
-              w-full group flex items-center justify-between px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200
+              w-full group flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200
               ${isItemActive
-                ? 'bg-gray-50 text-gray-900 border-r-2 border-maroon-600 dark:bg-gray-800 dark:text-white'
-                : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'
+                ? 'bg-gradient-to-r from-maroon-500 to-maroon-600 text-white shadow-lg shadow-maroon-500/30'
+                : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'
               }
             `}
           >
             <div className="flex items-center">
-              <span className={`${isItemActive ? 'text-maroon-600 dark:text-maroon-400' : 'text-gray-400 group-hover:text-gray-500 dark:text-gray-500 dark:group-hover:text-gray-400'} mr-3 ${iconSize}`}>
+              <span className={`${isItemActive ? 'text-white' : 'text-gray-400 group-hover:text-gray-600 dark:text-gray-500 dark:group-hover:text-gray-300'} mr-3 transition-colors`}>
                 {item.icon}
               </span>
-              {item.name}
+              <span className="font-semibold">{item.name}</span>
             </div>
-            <ChevronDownIcon 
+            <ChevronDown 
               className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'transform rotate-180' : ''}`}
             />
           </button>
           
           {isExpanded && (
-            <div className="mt-1 space-y-1">
+            <div className="mt-1 space-y-1 ml-4">
               {item.children!.map(child => renderNavigationItem(child, level + 1))}
             </div>
           )}
@@ -194,20 +137,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         to={item.href!}
         onClick={onClose}
         className={`
-          group flex items-center ${paddingLeft} pr-3 py-2 text-sm font-medium rounded-md transition-colors duration-200
+          group flex items-center ${paddingLeft} pr-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 transform hover:scale-[1.02]
           ${isItemActive
-            ? 'bg-gray-50 text-gray-900 border-r-2 border-maroon-600 dark:bg-gray-800 dark:text-white'
-            : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'
+            ? 'bg-gradient-to-r from-maroon-500 to-maroon-600 text-white shadow-lg shadow-maroon-500/30'
+            : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'
           }
         `}
         aria-current={isItemActive ? 'page' : undefined}
       >
-        <span className={`${isItemActive ? 'text-maroon-600 dark:text-maroon-400' : 'text-gray-400 group-hover:text-gray-500 dark:text-gray-500 dark:group-hover:text-gray-400'} mr-3 ${iconSize}`}>
+        <span className={`${isItemActive ? 'text-white' : 'text-gray-400 group-hover:text-gray-600 dark:text-gray-500 dark:group-hover:text-gray-300'} mr-3 transition-colors`}>
           {item.icon}
         </span>
-        {item.name}
+        <span className="flex-1 font-semibold">{item.name}</span>
         {item.badge && (
-          <span className="ml-auto bg-maroon-100 text-maroon-600 text-xs font-medium px-2 py-1 rounded-full">
+          <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${item.badgeColor || 'bg-maroon-100 text-maroon-700 dark:bg-maroon-900 dark:text-maroon-300'}`}>
             {item.badge}
           </span>
         )}
@@ -217,36 +160,94 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
 
   return (
     <>
-      {/* Mobile overlay */}
-      {isOpen && (
-        <div 
-          className="lg:hidden fixed inset-0 z-40 bg-gray-600 bg-opacity-75" 
-          onClick={onClose}
-        />
-      )}
-
-      {/* Sidebar */}
+      {/* Sidebar - FIXED on desktop */}
       <aside 
         className={`
-          fixed top-16 left-0 h-[calc(100vh-4rem)] z-50 lg:z-auto
+          fixed top-16 left-0 h-[calc(100vh-4rem)] z-50 lg:z-30
           transform ${isOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0
-          transition-transform duration-300 ease-in-out lg:transition-none
-          flex flex-col w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700
-          lg:sticky lg:top-16
+          transition-transform duration-300 ease-in-out
+          flex flex-col w-64 
+          bg-white/95 dark:bg-gray-900/95 backdrop-blur-lg
+          border-r border-gray-200/50 dark:border-gray-700/50
+          shadow-xl lg:shadow-none
         `}
       >
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          {navigationItems.map(item => renderNavigationItem(item))}
+        {/* Navigation */}
+        <nav className="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
+          {/* Quick Stats Card */}
+          <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-maroon-50 to-maroon-100 dark:from-gray-800 dark:to-gray-700 border border-maroon-200 dark:border-gray-600">
+            <div className="flex items-center space-x-2 mb-2">
+              <Sparkles className="h-4 w-4 text-maroon-600 dark:text-maroon-400" />
+              <span className="text-xs font-bold text-maroon-900 dark:text-maroon-200 uppercase tracking-wide">Quick Stats</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-center">
+              <div className="bg-white/60 dark:bg-gray-900/60 rounded-lg p-2">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Receipts</p>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">24</p>
+              </div>
+              <div className="bg-white/60 dark:bg-gray-900/60 rounded-lg p-2">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Total</p>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">$1.2K</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Navigation */}
+          <div className="space-y-1">
+            <p className="px-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+              Main Menu
+            </p>
+            {navigationItems.map(item => renderNavigationItem(item))}
+          </div>
+
+          {/* Settings Section */}
+          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700 space-y-1">
+            <p className="px-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+              Other
+            </p>
+            <Link
+              to="/settings"
+              className="group flex items-center pl-3 pr-3 py-2.5 text-sm font-medium rounded-xl text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white transition-all duration-200"
+            >
+              <Settings className="h-5 w-5 text-gray-400 group-hover:text-gray-600 dark:text-gray-500 dark:group-hover:text-gray-300 mr-3 transition-colors" />
+              <span className="font-semibold">Settings</span>
+            </Link>
+            <Link
+              to="/help"
+              className="group flex items-center pl-3 pr-3 py-2.5 text-sm font-medium rounded-xl text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white transition-all duration-200"
+            >
+              <HelpCircle className="h-5 w-5 text-gray-400 group-hover:text-gray-600 dark:text-gray-500 dark:group-hover:text-gray-300 mr-3 transition-colors" />
+              <span className="font-semibold">Help & Support</span>
+            </Link>
+          </div>
         </nav>
 
         {/* Footer */}
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-          <div className="text-xs text-gray-500 dark:text-gray-400 text-center">
-            <p>© 2025 NECF Treasury</p>
-            <p>Version 1.0.0</p>
+        <div className="p-4 border-t border-gray-200/50 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/50">
+          <div className="text-xs text-gray-500 dark:text-gray-400 text-center space-y-1">
+            <p className="font-semibold text-gray-700 dark:text-gray-300">NECF Treasury</p>
+            <p className="text-gray-400 dark:text-gray-500">Version 1.0.0</p>
+            <p className="text-gray-400 dark:text-gray-500">© 2025 All rights reserved</p>
           </div>
         </div>
       </aside>
+
+      {/* Custom scrollbar styles */}
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(156, 163, 175, 0.3);
+          border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(156, 163, 175, 0.5);
+        }
+      `}</style>
     </>
   );
 };

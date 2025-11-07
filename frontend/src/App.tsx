@@ -7,11 +7,9 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Login } from './pages/Auth/Login';
 import { UploadReceipt } from './pages/receipts/UploadReceipt';
-import { AdminDashboard } from './pages/AdminDashboard';
 import EnhancedAdminDashboard from './pages/EnhancedAdminDashboard';
 import LiveAnalytics from './pages/LiveAnalytics';
 import PurchaserPortal from './pages/PurchaserPortal';
-import LandingPage from './pages/LandingPage';
 import AnimatedLandingPage from './components/AnimatedLandingPage';
 import Reports from './pages/Reports';
 import './App.css';
@@ -118,7 +116,6 @@ function App() {
             <Routes>
               {/* Public routes */}
               <Route path="/" element={<AnimatedLandingPage />} />
-              <Route path="/landing-original" element={<LandingPage />} />
               <Route path="/login" element={<Login />} />
               
               {/* Public Purchaser Portal - no authentication required */}
@@ -130,7 +127,6 @@ function App() {
                 <Route path="/receipts/upload" element={<UploadReceipt />} />
                 <Route path="/admin" element={<EnhancedAdminDashboard />} />
                 <Route path="/admin/analytics" element={<LiveAnalytics />} />
-                <Route path="/admin-original" element={<AdminDashboard />} />
                 <Route path="/reports" element={<Reports />} />
               </Route>
               

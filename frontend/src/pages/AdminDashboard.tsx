@@ -43,8 +43,11 @@ interface AdminStats {
 interface ReceiptWithUser extends Receipt {
   id: string;
   vendor?: string;
+  extracted_vendor?: string;
   amount?: number;
+  extracted_total?: number;
   date?: string;
+  extracted_date?: string;
   description?: string;
   category?: string;
   status?: string;
@@ -91,18 +94,18 @@ export function AdminDashboard() {
     {
       key: 'search',
       label: 'Search',
-      type: 'search',
-      placeholder: 'Search vendor, description...'
+      type: 'text',
+      placeholder: 'Search vendor, description, or filename...'
     },
     {
       key: 'date_range',
       label: 'Date Range',
-      type: 'date-range'
+      type: 'date_range'
     },
     {
       key: 'vendor',
       label: 'Vendor',
-      type: 'select',
+      type: 'autocomplete',
       loadOptions: async (query: string) => {
         try {
           const vendors = await apiClient.get<{ vendors: Array<{ name: string; count: number }> }>(
@@ -110,7 +113,7 @@ export function AdminDashboard() {
           );
           return vendors.vendors.map((vendor) => ({
             value: vendor.name,
-            label: vendor.name,
+            label: `${vendor.name} (${vendor.count})`,
             count: vendor.count
           }));
         } catch (error) {
@@ -121,19 +124,22 @@ export function AdminDashboard() {
     },
     {
       key: 'amount_range',
-      label: 'Amount',
-      type: 'number-range'
+      label: 'Amount Range',
+      type: 'amount_range'
     },
     {
       key: 'category',
       label: 'Category',
       type: 'select',
       options: [
-        { value: 'food', label: 'Food & Dining' },
-        { value: 'transportation', label: 'Transportation' },
+        { value: 'food', label: 'Food & Beverages' },
         { value: 'office', label: 'Office Supplies' },
-        { value: 'healthcare', label: 'Healthcare' },
         { value: 'utilities', label: 'Utilities' },
+        { value: 'maintenance', label: 'Maintenance' },
+        { value: 'equipment', label: 'Equipment' },
+        { value: 'travel', label: 'Travel' },
+        { value: 'healthcare', label: 'Healthcare' },
+        { value: 'purchaser_portal', label: 'Purchaser Portal' },
         { value: 'other', label: 'Other' }
       ]
     },
@@ -143,47 +149,51 @@ export function AdminDashboard() {
       type: 'select',
       options: [
         { value: 'pending', label: 'Pending' },
+        { value: 'processing', label: 'Processing' },
+        { value: 'completed', label: 'Completed' },
         { value: 'approved', label: 'Approved' },
         { value: 'rejected', label: 'Rejected' }
       ]
-    },
-    {
-      key: 'uploader',
-      label: 'Uploader',
-      type: 'select',
-      loadOptions: async (query: string) => {
-        try {
-          const users = await apiClient.get<{ users: Array<{ id: string; username?: string; email: string; receipt_count: number }> }>(
-            `/admin/users/autocomplete?q=${encodeURIComponent(query)}&limit=20`
-          );
-          return users.users.map((user) => ({
-            value: user.id,
-            label: user.username || user.email,
-            count: user.receipt_count
-          }));
-        } catch (error) {
-          console.error('Failed to load user options:', error);
-          return [];
-        }
-      }
     }
   ];
 
-  // Table columns
+  // Table columns - focused on essential receipt data
   const columns: Column<ReceiptWithUser>[] = [
     {
+      key: 'image_preview',
+      header: 'Receipt',
+      sortable: false,
+      width: '80px',
+      render: (value, row) => (
+        <div className="w-12 h-12 bg-gray-100 rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow">
+          {row.image_url ? (
+            <img 
+              src={row.image_url} 
+              alt="Receipt" 
+              className="w-full h-full object-cover"
+              onClick={() => handleRowClick(row)}
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-gray-200">
+              <ReceiptIcon className="h-5 w-5 text-gray-400" />
+            </div>
+          )}
+        </div>
+      )
+    },
+    {
       key: 'purchase_date',
-      header: 'Purchase Date',
+      header: 'Date',
       sortable: true,
       width: '120px',
       render: (value, row) => {
-        const date = value || row.extracted_date;
+        const date = row.extracted_date || row.purchase_date || row.created_at;
         return date ? new Date(date).toLocaleDateString() : '—';
       }
     },
     {
       key: 'extracted_vendor',
-      header: 'Vendor/Purpose',
+      header: 'Vendor/Market',
       sortable: true,
       render: (value, row) => {
         // Check if this is a purchaser portal receipt
@@ -191,15 +201,21 @@ export function AdminDashboard() {
           return (
             <div className="text-sm">
               <div className="font-medium text-gray-900">
-                {row.event_purpose || 'No purpose specified'}
+                {value || 'Unknown Vendor'}
               </div>
               <div className="text-gray-500 text-xs">
-                Vendor: {value || 'Not specified'}
+                Purpose: {row.event_purpose || 'Not specified'}
               </div>
             </div>
           );
         }
-        return value || '—';
+        return (
+          <div className="text-sm">
+            <div className="font-medium text-gray-900">
+              {value || 'Unknown Vendor'}
+            </div>
+          </div>
+        );
       }
     },
     {
@@ -207,8 +223,21 @@ export function AdminDashboard() {
       header: 'Amount',
       sortable: true,
       align: 'right',
-      width: '100px',
-      render: (value) => value ? `$${Number(value).toFixed(2)}` : '—'
+      width: '120px',
+      render: (value) => {
+        if (!value || value === 0) return '—';
+        return (
+          <div className="text-sm">
+            <div className="font-semibold text-gray-900">
+              {value.toLocaleString('en-US', {
+                style: 'decimal',
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+              })} TL
+            </div>
+          </div>
+        );
+      }
     },
     {
       key: 'purchaser_name',
@@ -229,7 +258,47 @@ export function AdminDashboard() {
             </div>
           );
         }
-        return row.username || row.user_id || '—';
+        return (
+          <div className="text-sm">
+            <div className="font-medium text-gray-700">
+              {row.username || 'Admin User'}
+            </div>
+          </div>
+        );
+      }
+    },
+    {
+      key: 'items_bought',
+      header: 'Items Purchased',
+      sortable: false,
+      render: (value, row) => {
+        // Try to parse extracted items to show what was bought
+        let items: string[] = [];
+        
+        if (row.extracted_items) {
+          try {
+            const parsed = JSON.parse(row.extracted_items);
+            if (Array.isArray(parsed)) {
+              items = parsed.slice(0, 3); // Show first 3 items
+            }
+          } catch {
+            // If parsing fails, show description if available
+            if (row.description) {
+              items = [row.description];
+            }
+          }
+        }
+        
+        if (items.length === 0) {
+          return <span className="text-gray-400 text-xs">No items detected</span>;
+        }
+        
+        return (
+          <div className="text-xs text-gray-600">
+            {items.join(', ')}
+            {items.length === 3 && ' ...'}
+          </div>
+        );
       }
     },
     {
@@ -238,38 +307,20 @@ export function AdminDashboard() {
       sortable: true,
       width: '120px',
       render: (value, row) => {
-        if (row.category === 'purchaser_portal') {
-          return value || '—';
+        if (row.category === 'purchaser_portal' && value) {
+          return (
+            <div className="text-sm">
+              <div className="font-medium text-green-700">
+                {value}
+              </div>
+            </div>
+          );
         }
-        return '—';
-      }
-    },
-    {
-      key: 'upload_date',
-      header: 'Upload Date',
-      sortable: true,
-      width: '120px',
-      render: (value, row) => {
-        const date = value || row.created_at;
-        return date ? new Date(date).toLocaleDateString() : '—';
-      }
-    },
-    {
-      key: 'category',
-      header: 'Category',
-      sortable: true,
-      width: '120px',
-      render: (value) => {
-        const categoryLabels: Record<string, string> = {
-          food: 'Food & Dining',
-          transportation: 'Transportation',
-          office: 'Office Supplies',
-          healthcare: 'Healthcare',
-          utilities: 'Utilities',
-          purchaser_portal: 'Purchaser Portal',
-          other: 'Other'
-        };
-        return categoryLabels[value] || value || '—';
+        return value ? (
+          <div className="text-sm font-medium text-green-700">{value}</div>
+        ) : (
+          <span className="text-gray-400 text-xs">—</span>
+        );
       }
     },
     {
@@ -278,43 +329,36 @@ export function AdminDashboard() {
       sortable: true,
       width: '100px',
       render: (value) => {
-        const statusColors: Record<string, string> = {
-          pending: 'bg-yellow-100 text-yellow-800',
-          processing: 'bg-blue-100 text-blue-800',
-          completed: 'bg-green-100 text-green-800',
-          failed: 'bg-red-100 text-red-800'
+        const statusColors = {
+          pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+          processing: 'bg-blue-100 text-blue-800 border-blue-200',
+          completed: 'bg-green-100 text-green-800 border-green-200',
+          approved: 'bg-green-100 text-green-800 border-green-200',
+          rejected: 'bg-red-100 text-red-800 border-red-200'
         };
-        const color = statusColors[value] || 'bg-gray-100 text-gray-800';
+        
+        const colorClass = statusColors[value?.toLowerCase() as keyof typeof statusColors] || 
+                          'bg-gray-100 text-gray-800 border-gray-200';
+        
         return (
-          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${color}`}>
-            {value || 'pending'}
+          <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full border ${colorClass}`}>
+            {value?.charAt(0).toUpperCase() + (value?.slice(1) || '')}
           </span>
         );
       }
     },
     {
-      key: 'image',
-      header: 'Image',
+      key: 'actions',
+      header: 'Actions',
+      sortable: false,
       width: '80px',
-      render: (_, row) => (
-        <div className="flex justify-center">
-          {row.id ? (
-            <button
-              onClick={() => {
-                setSelectedReceipt(row);
-                setModalOpen(true);
-              }}
-              className="w-10 h-10 bg-gray-100 border border-gray-300 rounded flex items-center justify-center hover:bg-gray-200 transition-colors"
-              title="View receipt image"
-            >
-              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            </button>
-          ) : (
-            <span className="text-gray-400">—</span>
-          )}
-        </div>
+      render: (value, row) => (
+        <button
+          onClick={() => handleRowClick(row)}
+          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+        >
+          View Details
+        </button>
       )
     }
   ];
@@ -644,8 +688,6 @@ export function AdminDashboard() {
             loading={receiptsLoading}
           />
 
-          {console.log('🔥 About to render Table with receipts:', receipts)}
-          {console.log('🔥 Sample receipt data for Table:', receipts[0])}
           <Table
             data={receipts}
             columns={columns}

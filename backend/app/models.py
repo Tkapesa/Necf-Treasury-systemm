@@ -235,6 +235,11 @@ class Receipt(SQLModel, table=True):
         index=True,
         description="Manual category assignment for expense tracking"
     )
+    manually_edited: Optional[bool] = Field(
+        default=False,
+        index=True,
+        description="Flag indicating if receipt data was manually corrected by admin"
+    )
     
     # Timestamps for audit trail
     created_at: datetime = Field(

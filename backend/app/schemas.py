@@ -142,11 +142,27 @@ class ReceiptCreate(ReceiptBase):
 
 class ReceiptUpdate(BaseModel):
     """Schema for updating receipt information."""
+    # Manual entry fields (original)
     vendor_name: Optional[str] = Field(None, max_length=255)
     total_amount: Optional[Decimal] = Field(None, ge=0)
     transaction_date: Optional[datetime] = None
     category: Optional[str] = Field(None, max_length=100)
     status: Optional[ReceiptStatus] = None
+    
+    # OCR-extracted fields (for admin manual corrections)
+    extracted_vendor: Optional[str] = Field(None, max_length=255)
+    extracted_total: Optional[float] = Field(None, ge=0)
+    extracted_date: Optional[datetime] = None
+    
+    # Additional fields
+    description: Optional[str] = None
+    purchaser_name: Optional[str] = None
+    purchaser_email: Optional[str] = None
+    event_purpose: Optional[str] = None
+    additional_notes: Optional[str] = None
+    
+    # Track manual edits
+    manually_edited: Optional[bool] = None
 
 
 class ReceiptInDB(BaseModel):
@@ -184,6 +200,8 @@ class ReceiptInDB(BaseModel):
     purchase_date: Optional[datetime] = None
     upload_date: datetime
     category: Optional[str] = None
+    # Manual edit tracking
+    manually_edited: Optional[bool] = None
     
     # Timestamps
     created_at: datetime

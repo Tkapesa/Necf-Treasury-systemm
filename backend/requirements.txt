@@ -36,19 +36,16 @@ isort==5.12.0
 flake8==6.1.0
 pre-commit==3.5.0
 
-# OCR/Image processing
+# Real OCR and Image Processing
 Pillow==10.3.0
-# Optional deep OCR (requires system packages: tesseract-ocr, poppler)
-# pytesseract==0.3.10
-# pdf2image==1.16.3
+pytesseract==0.3.10
+opencv-python==4.8.1.78
+numpy==1.25.2
+pdf2image==1.16.3
 
 # Optional Email Support
 # fastapi-mail==1.4.1
 
-# OCR Dependencies
-Pillow==10.1.0
-pytesseract==0.3.10
-pdf2image==1.16.3
 # Production WSGI Server
 gunicorn==21.2.0
 

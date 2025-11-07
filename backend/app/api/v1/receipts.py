@@ -22,6 +22,7 @@ from app.core.database import get_session
 from app.models import Receipt, User, ReceiptStatus, UserRole
 from app.core.security import get_current_user
 from urllib.parse import urljoin
+from app.schemas import ReceiptUpdate
 
 # Thumbnail helpers
 def _public_url(rel_path: Optional[str]) -> Optional[str]:
@@ -49,34 +50,68 @@ def _resolve_paths(storage_path: Optional[str]) -> tuple[Optional[str], Optional
     except Exception:
         return None, storage_path if not os.path.isabs(storage_path or '') else None
 
-def _ensure_thumbnail(abs_path: Optional[str], rel_path: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-    """Create thumbnail if needed; return (abs_thumb, rel_thumb). Works for images and PDFs."""
+def _ensure_thumbnail(abs_path: Optional[str], rel_path: Optional[str], size: str = "medium") -> tuple[Optional[str], Optional[str]]:
+    """Create thumbnail if needed; return (abs_thumb, rel_thumb). Works for images and PDFs.
+    
+    Args:
+        abs_path: Absolute path to original image
+        rel_path: Relative path for URL generation
+        size: 'small' (256px for lists), 'medium' (1024px for viewing), or 'full' (original)
+    """
     if not abs_path or not rel_path or not os.path.exists(abs_path):
         return abs_path, rel_path
+    
+    # Return original for full size
+    if size == "full":
+        return abs_path, rel_path
+    
+    # Determine thumbnail size
+    thumb_size = (256, 256) if size == "small" else (1024, 1024)  # medium size
+    size_suffix = "_small" if size == "small" else "_thumb"
+    
     base, ext = os.path.splitext(rel_path)
-    thumb_rel = f"{base}_thumb.png" if ext.lower() == '.pdf' else f"{base}_thumb{ext}"
+    thumb_rel = f"{base}{size_suffix}.png" if ext.lower() == '.pdf' else f"{base}{size_suffix}{ext}"
     thumb_abs = os.path.join(settings.upload_path, thumb_rel)
+    
     # If already exists, return it
     if os.path.exists(thumb_abs):
         return thumb_abs, thumb_rel
+    
     try:
         os.makedirs(os.path.dirname(thumb_abs), exist_ok=True)
         if ext.lower() == '.pdf':
             from pdf2image import convert_from_path
-            pages = convert_from_path(abs_path, dpi=144, first_page=1, last_page=1)
+            pages = convert_from_path(abs_path, dpi=200, first_page=1, last_page=1)
             if pages:
                 img = pages[0]
-                img.thumbnail((256, 256))
-                img.save(thumb_abs, format='PNG')
+                # Use LANCZOS resampling for better quality
+                img.thumbnail(thumb_size, resample=getattr(__import__('PIL.Image'), 'LANCZOS', 3))
+                img.save(thumb_abs, format='PNG', quality=95, optimize=True)
                 return thumb_abs, thumb_rel
         else:
             from PIL import Image
             with Image.open(abs_path) as im:
-                im.thumbnail((256, 256))
-                im.save(thumb_abs)
+                # Convert to RGB if necessary (handles PNG with transparency)
+                if im.mode in ('RGBA', 'LA', 'P'):
+                    rgb_im = Image.new('RGB', im.size, (255, 255, 255))
+                    if im.mode == 'P':
+                        im = im.convert('RGBA')
+                    rgb_im.paste(im, mask=im.split()[-1] if im.mode in ('RGBA', 'LA') else None)
+                    im = rgb_im
+                
+                # Use LANCZOS resampling for better quality
+                im.thumbnail(thumb_size, resample=getattr(Image, 'LANCZOS', 3))
+                
+                # Save with high quality
+                if ext.lower() in ['.jpg', '.jpeg']:
+                    im.save(thumb_abs, format='JPEG', quality=95, optimize=True)
+                else:
+                    im.save(thumb_abs, quality=95, optimize=True)
                 return thumb_abs, thumb_rel
     except Exception as e:
         print(f"⚠️ Thumbnail generation failed for {abs_path}: {e}")
+        import traceback
+        traceback.print_exc()
         return abs_path, rel_path
 
 
@@ -273,10 +308,16 @@ async def upload_receipt(
         print(f"💾 Receipt saved with ID: {receipt.id}, Status: {receipt.status}")
         print("🎉 REAL-TIME OCR COMPLETE! User sees results immediately!")
 
-        # Build public image URL for frontend (prefer thumbnail)
+        # Build public image URLs for frontend
         abs_path, rel_path = _resolve_paths(rel_storage_path)
-        _thumb_abs, thumb_rel = _ensure_thumbnail(abs_path, rel_path)
-        image_url = _public_url(thumb_rel or rel_path)
+        
+        # Generate both small thumbnail (for lists) and medium preview (for viewing)
+        _thumb_abs_small, thumb_rel_small = _ensure_thumbnail(abs_path, rel_path, size="small")
+        _thumb_abs_medium, thumb_rel_medium = _ensure_thumbnail(abs_path, rel_path, size="medium")
+        
+        # Return medium-quality preview as default image_url
+        image_url = _public_url(thumb_rel_medium or rel_path)
+        thumbnail_url = _public_url(thumb_rel_small or rel_path)
 
         return {
             "id": receipt.id,
@@ -284,8 +325,13 @@ async def upload_receipt(
             "status": receipt.status.value,
             "extracted_vendor": receipt.extracted_vendor,
             "extracted_total": float(receipt.extracted_total) if receipt.extracted_total else 0,
+            "extracted_date": receipt.extracted_date.isoformat() if receipt.extracted_date else None,
             "ocr_raw_text": receipt.ocr_raw_text,
-            "image_url": image_url,
+            "ocr_confidence": receipt.ocr_confidence,
+            "processing_time": receipt.processing_time,
+            "extracted_items": receipt.extracted_items,
+            "image_url": image_url,  # Medium quality for viewing
+            "thumbnail_url": thumbnail_url,  # Small for lists
             "message": "Receipt uploaded and processed successfully"
         }
         
@@ -456,8 +502,15 @@ def get_receipts(
                 
                 # Additional fields for frontend
                 "uploader_type": "purchaser_portal" if receipt.purchaser_name else "admin_user",
-                # Image URL: prefer generated thumbnail; normalize absolute/relative paths
-                "image_url": (lambda r: _public_url(_ensure_thumbnail(*_resolve_paths(r.storage_path))[1] or _resolve_paths(r.storage_path)[1]) if r.storage_path else None)(receipt)
+                # Image URLs: provide both thumbnail (small) and preview (medium)
+                "image_url": (lambda r: _public_url(_ensure_thumbnail(*_resolve_paths(r.storage_path), size="medium")[1] or _resolve_paths(r.storage_path)[1]) if r.storage_path else None)(receipt),
+                "thumbnail_url": (lambda r: _public_url(_ensure_thumbnail(*_resolve_paths(r.storage_path), size="small")[1] or _resolve_paths(r.storage_path)[1]) if r.storage_path else None)(receipt),
+                # Extracted OCR data
+            "ocr_raw_text": receipt.ocr_raw_text,
+                "ocr_confidence": receipt.ocr_confidence,
+            "extracted_items": receipt.extracted_items,
+            # Manual edit tracking
+            "manually_edited": receipt.manually_edited
             }
             for receipt in receipts
         ],
@@ -495,10 +548,14 @@ def get_receipt(
             detail="Access denied"
         )
     
-    # Build image URL (prefer thumbnail) with normalized paths
+    # Build image URLs with normalized paths (provide both sizes)
     abs_path, rel_path = _resolve_paths(receipt.storage_path)
-    _thumb_abs, thumb_rel = _ensure_thumbnail(abs_path, rel_path)
-    image_url = _public_url(thumb_rel or rel_path)
+    _thumb_abs_medium, thumb_rel_medium = _ensure_thumbnail(abs_path, rel_path, size="medium")
+    _thumb_abs_small, thumb_rel_small = _ensure_thumbnail(abs_path, rel_path, size="small")
+    
+    image_url = _public_url(thumb_rel_medium or rel_path)
+    thumbnail_url = _public_url(thumb_rel_small or rel_path)
+    
     return {
         "id": receipt.id,
         "filename": receipt.filename,
@@ -511,10 +568,13 @@ def get_receipt(
         # Aliases for frontend compatibility
         "vendor": receipt.extracted_vendor,
         "amount": float(receipt.extracted_total) if receipt.extracted_total else None,
-    "extracted_items": receipt.extracted_items,
-    "ocr_raw_text": receipt.ocr_raw_text,
-    # Image URL with normalization (prefers thumbnail)
-    "image_url": image_url,
+        "extracted_items": receipt.extracted_items,
+        "ocr_raw_text": receipt.ocr_raw_text,
+        "ocr_confidence": receipt.ocr_confidence,
+        "processing_time": receipt.processing_time,
+        # Image URLs (medium for viewing, small for thumbnails)
+        "image_url": image_url,
+        "thumbnail_url": thumbnail_url,
         
         # Enhanced date tracking
         "purchase_date": receipt.purchase_date.isoformat() if receipt.purchase_date else None,
@@ -575,10 +635,16 @@ def get_receipt_status(
 @router.get("/{receipt_id}/image")
 def get_receipt_image(
     receipt_id: str,
+    size: str = Query("full", regex="^(small|medium|full)$"),
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
-    """Serve receipt image file."""
+    """Serve receipt image file with size options.
+    
+    Args:
+        receipt_id: Receipt UUID
+        size: Image size - 'small' (256px), 'medium' (1024px), 'full' (original)
+    """
     receipt = session.get(Receipt, receipt_id)
     
     if not receipt:
@@ -609,6 +675,15 @@ def get_receipt_image(
             detail="Receipt image not found"
         )
     
+    # Generate thumbnail if requested (otherwise serve full image)
+    if size in ["small", "medium"]:
+        abs_path_resolved, rel_path = _resolve_paths(storage_path)
+        thumb_abs, thumb_rel = _ensure_thumbnail(abs_path_resolved, rel_path, size=size)
+        if thumb_abs and os.path.exists(thumb_abs):
+            abs_path = thumb_abs
+        else:
+            print(f"⚠️ Thumbnail not available, serving original")
+    
     return FileResponse(
         path=abs_path,
         media_type=receipt.mime_type or "image/jpeg",
@@ -619,13 +694,11 @@ def get_receipt_image(
 @router.put("/{receipt_id}")
 def update_receipt(
     receipt_id: str,
-    extracted_vendor: Optional[str] = Form(None),
-    extracted_total: Optional[float] = Form(None),
-    category: Optional[str] = Form(None),
+    receipt_update: ReceiptUpdate,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
-    """Update receipt information."""
+    """Update receipt information via JSON body (admin/owner)."""
     receipt = session.get(Receipt, receipt_id)
     
     if not receipt:
@@ -642,13 +715,41 @@ def update_receipt(
             detail="Access denied"
         )
     
-    # Update fields
-    if extracted_vendor is not None:
-        receipt.extracted_vendor = extracted_vendor
-    if extracted_total is not None:
-        receipt.extracted_total = extracted_total
-    if category is not None:
-        receipt.category = category
+    # Apply updates
+    data = receipt_update.dict(exclude_unset=True)
+    if "extracted_vendor" in data:
+        receipt.extracted_vendor = data["extracted_vendor"]
+    if "extracted_total" in data:
+        try:
+            receipt.extracted_total = float(data["extracted_total"]) if data["extracted_total"] is not None else None
+        except (TypeError, ValueError):
+            pass
+    if "extracted_date" in data and data["extracted_date"] is not None:
+        # Pydantic parses to datetime; store as-is
+        receipt.extracted_date = data["extracted_date"]
+        # Also set purchase_date for UI if not set
+        if not receipt.purchase_date:
+            receipt.purchase_date = data["extracted_date"]
+    if "category" in data:
+        receipt.category = data["category"]
+    if "status" in data and data["status"] is not None:
+        # Ensure valid enum
+        try:
+            receipt.status = ReceiptStatus(data["status"]) if isinstance(data["status"], str) else data["status"]
+        except Exception:
+            pass
+    if "description" in data:
+        receipt.description = data["description"]
+    if "purchaser_name" in data:
+        receipt.purchaser_name = data["purchaser_name"]
+    if "purchaser_email" in data:
+        receipt.purchaser_email = data["purchaser_email"]
+    if "event_purpose" in data:
+        receipt.event_purpose = data["event_purpose"]
+    if "additional_notes" in data:
+        receipt.additional_notes = data["additional_notes"]
+    if "manually_edited" in data:
+        receipt.manually_edited = bool(data["manually_edited"]) if data["manually_edited"] is not None else receipt.manually_edited
     
     receipt.updated_at = datetime.utcnow()
     session.commit()
@@ -659,8 +760,15 @@ def update_receipt(
         "filename": receipt.filename,
         "status": receipt.status.value,
         "extracted_vendor": receipt.extracted_vendor,
-        "extracted_total": float(receipt.extracted_total) if receipt.extracted_total else None,
+        "extracted_total": float(receipt.extracted_total) if receipt.extracted_total is not None else None,
+        "extracted_date": receipt.extracted_date.isoformat() if receipt.extracted_date else None,
         "category": receipt.category,
+        "description": receipt.description,
+        "purchaser_name": receipt.purchaser_name,
+        "purchaser_email": receipt.purchaser_email,
+        "event_purpose": receipt.event_purpose,
+        "additional_notes": receipt.additional_notes,
+        "manually_edited": receipt.manually_edited,
         "message": "Receipt updated successfully"
     }
 

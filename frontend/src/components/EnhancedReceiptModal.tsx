@@ -1,15 +1,30 @@
 /**
  * Enhanced Receipt Modal Component
  * 
- * Displays receipt details with extracted OCR data including:
- * - Vendor information
- * - Date and amount
- * - Individual line items extracted from OCR
- * - Processing status and confidence
+ * Displays comprehensive receipt details with extracted OCR data including:
+ * - Vendor information and purchase date
+ * - Total amount and all monetary values found
+ * - Individual line items with quantities and prices
+ * - All amounts detected on the receipt
+ * - Items purchased list
+ * - Processing status and confidence scores
+ * - Clear receipt image display
  */
 
 import React from 'react';
-import { X, Calendar, DollarSign, MapPin, ShoppingCart, FileText, Eye } from 'lucide-react';
+import { 
+  X, 
+  Calendar, 
+  DollarSign, 
+  MapPin, 
+  ShoppingCart, 
+  FileText, 
+  Eye, 
+  Package,
+  Receipt as ReceiptIcon,
+  TrendingUp,
+  Hash
+} from 'lucide-react';
 
 interface ReceiptItem {
   name?: string;
@@ -18,6 +33,16 @@ interface ReceiptItem {
   amount?: number;
   quantity?: number;
   total?: number;
+  unit_price?: number;
+  total_price?: number;
+  line_number?: number;
+}
+
+interface AmountFound {
+  amount: number;
+  line: number;
+  context: string;
+  raw_text: string;
 }
 
 interface ReceiptData {
@@ -38,6 +63,12 @@ interface ReceiptData {
   ocr_raw_text?: string;
   confidence?: number;
   processing_time?: number;
+  
+  // Enhanced OCR fields
+  all_amounts?: AmountFound[];
+  line_items?: ReceiptItem[];
+  items?: string[];
+  currency?: string;
   
   // Purchaser portal fields
   purchaser_name?: string;
@@ -60,33 +91,39 @@ const EnhancedReceiptModal: React.FC<EnhancedReceiptModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  // Parse extracted items if they're in JSON string format
-  const getExtractedItems = (): ReceiptItem[] => {
-    if (!receipt.extracted_items) return [];
-    
-    if (typeof receipt.extracted_items === 'string') {
-      try {
-        const parsed = JSON.parse(receipt.extracted_items);
-        if (Array.isArray(parsed)) {
-          return parsed;
-        }
-        return [];
-      } catch {
-        return [];
-      }
+
+  // Parse all amounts found
+  const getAllAmountsFound = (): AmountFound[] => {
+    if (receipt.all_amounts && Array.isArray(receipt.all_amounts)) {
+      return receipt.all_amounts;
     }
-    
-    if (Array.isArray(receipt.extracted_items)) {
-      return receipt.extracted_items;
-    }
-    
     return [];
   };
 
-  const extractedItems = getExtractedItems();
+  // Parse line items
+  const getLineItems = (): ReceiptItem[] => {
+    if (receipt.line_items && Array.isArray(receipt.line_items)) {
+      return receipt.line_items;
+    }
+    return [];
+  };
+
+  // Parse items list
+  const getItemsList = (): string[] => {
+    if (receipt.items && Array.isArray(receipt.items)) {
+      return receipt.items;
+    }
+    return [];
+  };
+
+  const allAmounts = getAllAmountsFound();
+  const lineItems = getLineItems();
+  const itemsList = getItemsList();
+  
   const displayVendor = receipt.extracted_vendor || receipt.vendor || 'Unknown Vendor';
   const displayAmount = receipt.extracted_total || receipt.amount;
   const displayDate = receipt.extracted_date || receipt.purchase_date || receipt.date || receipt.created_at;
+  const displayCurrency = receipt.currency || 'TL';
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'Not available';
@@ -136,12 +173,12 @@ const EnhancedReceiptModal: React.FC<EnhancedReceiptModalProps> = ({
         />
 
         {/* Modal content */}
-        <div className="inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-4xl sm:w-full">
+        <div className="inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-6xl sm:w-full">
           {/* Header */}
           <div className="bg-white dark:bg-gray-800 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                Receipt Details
+                Receipt Details - {displayVendor}
               </h3>
               <button
                 onClick={onClose}
@@ -153,16 +190,16 @@ const EnhancedReceiptModal: React.FC<EnhancedReceiptModalProps> = ({
           </div>
 
           {/* Content */}
-          <div className="bg-white dark:bg-gray-800 px-6 py-4 max-h-96 overflow-y-auto">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white dark:bg-gray-800 px-6 py-6 max-h-[80vh] overflow-y-auto">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {/* Left Column - Receipt Image */}
-              <div className="space-y-4">
-                <div className="aspect-square bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden">
+              <div className="space-y-6">
+                <div className="aspect-square bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden border">
                   {receipt.image_url ? (
                     <img
                       src={receipt.image_url}
                       alt="Receipt"
-                      className="w-full h-full object-contain"
+                      className="w-full h-full object-contain hover:object-cover transition-all cursor-zoom-in"
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
@@ -174,7 +211,8 @@ const EnhancedReceiptModal: React.FC<EnhancedReceiptModalProps> = ({
                 {/* OCR Processing Info */}
                 {receipt.confidence !== undefined && (
                   <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                    <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">
+                    <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-3 flex items-center">
+                      <TrendingUp className="h-4 w-4 mr-2" />
                       OCR Processing
                     </h4>
                     <div className="space-y-2 text-sm">
@@ -201,17 +239,18 @@ const EnhancedReceiptModal: React.FC<EnhancedReceiptModalProps> = ({
               <div className="space-y-6">
                 {/* Basic Information */}
                 <div>
-                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                    <ReceiptIcon className="h-5 w-5 mr-2" />
                     Receipt Information
                   </h4>
                   
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {/* Vendor */}
                     <div className="flex items-start space-x-3">
                       <MapPin className="h-5 w-5 text-gray-400 mt-0.5" />
                       <div className="flex-1">
                         <dt className="text-sm font-medium text-gray-600 dark:text-gray-400">Vendor</dt>
-                        <dd className="text-sm text-gray-900 dark:text-white">{displayVendor}</dd>
+                        <dd className="text-lg font-semibold text-gray-900 dark:text-white">{displayVendor}</dd>
                       </div>
                     </div>
 
@@ -219,9 +258,9 @@ const EnhancedReceiptModal: React.FC<EnhancedReceiptModalProps> = ({
                     <div className="flex items-start space-x-3">
                       <DollarSign className="h-5 w-5 text-gray-400 mt-0.5" />
                       <div className="flex-1">
-                        <dt className="text-sm font-medium text-gray-600 dark:text-gray-400">Amount</dt>
-                        <dd className="text-lg font-semibold text-gray-900 dark:text-white">
-                          ${displayAmount?.toFixed(2) || '0.00'}
+                        <dt className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Amount</dt>
+                        <dd className="text-2xl font-bold text-gray-900 dark:text-white">
+                          {displayAmount?.toFixed(2) || '0.00'} {displayCurrency}
                         </dd>
                       </div>
                     </div>
@@ -230,7 +269,7 @@ const EnhancedReceiptModal: React.FC<EnhancedReceiptModalProps> = ({
                     <div className="flex items-start space-x-3">
                       <Calendar className="h-5 w-5 text-gray-400 mt-0.5" />
                       <div className="flex-1">
-                        <dt className="text-sm font-medium text-gray-600 dark:text-gray-400">Date</dt>
+                        <dt className="text-sm font-medium text-gray-600 dark:text-gray-400">Purchase Date</dt>
                         <dd className="text-sm text-gray-900 dark:text-white">
                           {formatDate(displayDate)}
                         </dd>
@@ -265,65 +304,112 @@ const EnhancedReceiptModal: React.FC<EnhancedReceiptModalProps> = ({
                   </div>
                 </div>
 
+                {/* All Amounts Found */}
+                {allAmounts.length > 0 && (
+                  <div>
+                    <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                      <Hash className="h-5 w-5 mr-2" />
+                      All Amounts Found ({allAmounts.length})
+                    </h4>
+                    <div className="bg-blue-50 dark:bg-blue-900 rounded-lg p-4">
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-32 overflow-y-auto">
+                        {allAmounts.map((amount, index) => (
+                          <div key={index} className="bg-white dark:bg-gray-800 rounded-lg p-2 border">
+                            <div className="text-lg font-semibold text-blue-900 dark:text-blue-100">
+                              {amount.amount.toFixed(2)} {displayCurrency}
+                            </div>
+                            <div className="text-xs text-blue-700 dark:text-blue-300 truncate">
+                              Line {amount.line}: {amount.context}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Line Items with Prices */}
+                {lineItems.length > 0 && (
+                  <div>
+                    <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                      <Package className="h-5 w-5 mr-2" />
+                      Line Items ({lineItems.length})
+                    </h4>
+                    <div className="bg-green-50 dark:bg-green-900 rounded-lg p-4">
+                      <div className="space-y-3 max-h-40 overflow-y-auto">
+                        {lineItems.map((item, index) => (
+                          <div key={index} className="flex justify-between items-start py-2 border-b border-green-200 dark:border-green-700 last:border-b-0">
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-green-900 dark:text-green-100">
+                                {item.name || item.description || `Item ${index + 1}`}
+                              </div>
+                              {item.quantity && item.quantity > 1 && (
+                                <div className="text-xs text-green-700 dark:text-green-300">
+                                  Qty: {item.quantity} × {item.unit_price?.toFixed(2)} {displayCurrency}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-sm font-semibold text-green-900 dark:text-green-100">
+                              {(item.total_price || item.total || item.amount || item.price || 0).toFixed(2)} {displayCurrency}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Items Purchased List */}
+                {itemsList.length > 0 && (
+                  <div>
+                    <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
+                      <ShoppingCart className="h-5 w-5 mr-2" />
+                      Items Purchased ({itemsList.length})
+                    </h4>
+                    <div className="bg-yellow-50 dark:bg-yellow-900 rounded-lg p-4">
+                      <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                        {itemsList.map((item, index) => (
+                          <span 
+                            key={index}
+                            className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200"
+                          >
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Purchaser Information (if applicable) */}
                 {receipt.purchaser_name && (
                   <div>
                     <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                       Purchaser Information
                     </h4>
-                    <div className="space-y-2 text-sm">
+                    <div className="bg-maroon-50 dark:bg-maroon-900 rounded-lg p-4 space-y-2 text-sm">
                       <div>
-                        <span className="font-medium text-gray-600 dark:text-gray-400">Name:</span>
-                        <span className="ml-2 text-gray-900 dark:text-white">{receipt.purchaser_name}</span>
+                        <span className="font-medium text-maroon-800 dark:text-maroon-200">Name:</span>
+                        <span className="ml-2 text-maroon-900 dark:text-maroon-100">{receipt.purchaser_name}</span>
                       </div>
                       {receipt.purchaser_email && (
                         <div>
-                          <span className="font-medium text-gray-600 dark:text-gray-400">Email:</span>
-                          <span className="ml-2 text-gray-900 dark:text-white">{receipt.purchaser_email}</span>
+                          <span className="font-medium text-maroon-800 dark:text-maroon-200">Email:</span>
+                          <span className="ml-2 text-maroon-900 dark:text-maroon-100">{receipt.purchaser_email}</span>
                         </div>
                       )}
                       {receipt.event_purpose && (
                         <div>
-                          <span className="font-medium text-gray-600 dark:text-gray-400">Purpose:</span>
-                          <span className="ml-2 text-gray-900 dark:text-white">{receipt.event_purpose}</span>
+                          <span className="font-medium text-maroon-800 dark:text-maroon-200">Purpose:</span>
+                          <span className="ml-2 text-maroon-900 dark:text-maroon-100">{receipt.event_purpose}</span>
                         </div>
                       )}
                       {receipt.approved_by && (
                         <div>
-                          <span className="font-medium text-gray-600 dark:text-gray-400">Approved By:</span>
-                          <span className="ml-2 text-gray-900 dark:text-white">{receipt.approved_by}</span>
+                          <span className="font-medium text-maroon-800 dark:text-maroon-200">Approved By:</span>
+                          <span className="ml-2 text-maroon-900 dark:text-maroon-100">{receipt.approved_by}</span>
                         </div>
                       )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Extracted Items */}
-                {extractedItems.length > 0 && (
-                  <div>
-                    <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                      Extracted Items
-                    </h4>
-                    <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                      <div className="space-y-2">
-                        {extractedItems.map((item, index) => (
-                          <div key={index} className="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
-                            <div className="flex-1">
-                              <div className="text-sm font-medium text-gray-900 dark:text-white">
-                                {item.name || item.description || `Item ${index + 1}`}
-                              </div>
-                              {item.quantity && item.quantity > 1 && (
-                                <div className="text-xs text-gray-600 dark:text-gray-400">
-                                  Quantity: {item.quantity}
-                                </div>
-                              )}
-                            </div>
-                            <div className="text-sm font-semibold text-gray-900 dark:text-white">
-                              ${(item.total || item.amount || item.price || 0).toFixed(2)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
                     </div>
                   </div>
                 )}
@@ -334,7 +420,7 @@ const EnhancedReceiptModal: React.FC<EnhancedReceiptModalProps> = ({
                     <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                       Description
                     </h4>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                    <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
                       {receipt.description}
                     </p>
                   </div>
@@ -346,7 +432,7 @@ const EnhancedReceiptModal: React.FC<EnhancedReceiptModalProps> = ({
                     <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                       Additional Notes
                     </h4>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                    <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
                       {receipt.additional_notes}
                     </p>
                   </div>
@@ -356,13 +442,15 @@ const EnhancedReceiptModal: React.FC<EnhancedReceiptModalProps> = ({
 
             {/* Raw OCR Text (Collapsible) */}
             {receipt.ocr_raw_text && (
-              <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+              <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
                 <details className="group">
-                  <summary className="cursor-pointer text-sm font-medium text-gray-900 dark:text-white hover:text-gray-700 dark:hover:text-gray-300">
+                  <summary className="cursor-pointer text-sm font-medium text-gray-900 dark:text-white hover:text-gray-700 dark:hover:text-gray-300 flex items-center">
+                    <FileText className="h-4 w-4 mr-2" />
                     View Raw OCR Text
+                    <span className="ml-2 text-xs text-gray-500">({receipt.ocr_raw_text.length} characters)</span>
                   </summary>
-                  <div className="mt-2 bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                    <pre className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap font-mono">
+                  <div className="mt-3 bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                    <pre className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">
                       {receipt.ocr_raw_text}
                     </pre>
                   </div>
@@ -375,7 +463,7 @@ const EnhancedReceiptModal: React.FC<EnhancedReceiptModalProps> = ({
           <div className="bg-gray-50 dark:bg-gray-700 px-6 py-4 flex justify-end">
             <button
               onClick={onClose}
-              className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 transition-colors"
+              className="bg-gray-600 text-white px-6 py-2 rounded-md hover:bg-gray-700 transition-colors"
             >
               Close
             </button>

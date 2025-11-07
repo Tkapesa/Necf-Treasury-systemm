@@ -217,13 +217,14 @@ async def upload_receipt(
         print(f"🔍 Processing OCR for {file.filename}...")
         ocr_service = get_ocr_service()
         
-        # Extract OCR data
+        # Extract comprehensive OCR data
         ocr_text = await ocr_service.extract_text(file_path)
         structured_data = await ocr_service.extract_structured_data(file_path)
         
         print(f"✅ OCR Results: {structured_data.get('vendor_name', 'Unknown')} - {structured_data.get('total_amount', 0)} TL")
+        print(f"📝 Found {len(structured_data.get('all_amounts', []))} amounts and {len(structured_data.get('items', []))} items")
         
-        # Create receipt record with OCR data
+        # Create receipt record with comprehensive OCR data
         receipt = Receipt(
             filename=file.filename,
             storage_path=file_path,
@@ -232,13 +233,19 @@ async def upload_receipt(
             uploader_id=current_user.id,
             status=ReceiptStatus.COMPLETED,  # Set to completed immediately
             upload_date=datetime.utcnow(),
-            # OCR fields
+            # Basic OCR fields
             ocr_raw_text=ocr_text,
             extracted_vendor=vendor_name or structured_data.get('vendor_name', ''),
             extracted_total=structured_data.get('total_amount', 0),
             ocr_confidence=structured_data.get('confidence', 0.95),
             processing_time=structured_data.get('processing_time', 1.2),
-            extracted_items=str(structured_data.get('items', [])),
+            # Enhanced OCR data - store as JSON for frontend consumption
+            extracted_items=json.dumps({
+                "items": structured_data.get('items', []),
+                "line_items": structured_data.get('line_items', []),
+                "all_amounts": structured_data.get('all_amounts', []),
+                "currency": structured_data.get('currency', 'TL')
+            }),
             category=category or 'general'
         )
         

@@ -49,9 +49,10 @@ export function ReceiptImageModal({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
   // Helper function to fetch image with authentication
-  const fetchImageWithAuth = async (receiptId: string): Promise<string | null> => {
+  const fetchImageWithAuth = async (receiptId: string, size: 'small' | 'medium' | 'full' = 'full'): Promise<string | null> => {
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/receipts/${receiptId}/image`, {
+      // Request full-size image for modal viewing (best quality)
+      const response = await fetch(`http://localhost:8000/api/v1/receipts/${receiptId}/image?size=${size}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }

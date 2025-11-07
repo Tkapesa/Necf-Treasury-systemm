@@ -13,7 +13,9 @@ import {
   BuildingIcon,
   TagIcon,
   CreditCardIcon,
-  ClockIcon
+  ClockIcon,
+  Edit3,
+  Shield
 } from 'lucide-react';
 
 export interface EnhancedReceiptData {
@@ -40,6 +42,7 @@ export interface EnhancedReceiptData {
   imageUrl?: string;
   image_url?: string;
   receiptNumber?: string;
+  manually_edited?: boolean; // Flag for manually edited receipts
   // Purchaser portal specific fields
   event_purpose?: string;
   purchaser_email?: string;
@@ -55,6 +58,8 @@ export interface EnhancedReceiptData {
 interface EnhancedReceiptTableProps {
   receipts: EnhancedReceiptData[];
   onReceiptClick?: (receipt: EnhancedReceiptData) => void;
+  onEdit?: (receipt: EnhancedReceiptData) => void; // New prop for edit action
+  userRole?: string; // User role to determine if edit is allowed
 }
 
 const getStatusColor = (status: string) => {
@@ -78,8 +83,17 @@ const getStatusColor = (status: string) => {
 
 export const EnhancedReceiptTable: React.FC<EnhancedReceiptTableProps> = ({
   receipts,
-  onReceiptClick
+  onReceiptClick,
+  onEdit,
+  userRole = 'user'
 }) => {
+  const isAdmin = userRole === 'admin';
+
+  const handleEditClick = (e: React.MouseEvent, receipt: EnhancedReceiptData) => {
+    e.stopPropagation(); // Prevent row click event
+    onEdit?.(receipt);
+  };
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -92,6 +106,9 @@ export const EnhancedReceiptTable: React.FC<EnhancedReceiptTableProps> = ({
             <th className="text-left py-3 px-4 font-medium text-gray-700 dark:text-gray-300 text-sm">Receipt</th>
             <th className="text-right py-3 px-4 font-medium text-gray-700 dark:text-gray-300 text-sm">Amount</th>
             <th className="text-center py-3 px-4 font-medium text-gray-700 dark:text-gray-300 text-sm">Status</th>
+            {isAdmin && (
+              <th className="text-center py-3 px-4 font-medium text-gray-700 dark:text-gray-300 text-sm">Actions</th>
+            )}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -123,9 +140,20 @@ export const EnhancedReceiptTable: React.FC<EnhancedReceiptTableProps> = ({
               <td className="py-4 px-4 text-sm">
                 <div className="flex items-start space-x-2">
                   <BuildingIcon className="h-4 w-4 text-gray-400 mt-0.5" />
-                  <div className="min-w-0">
-                    <div className="font-medium text-gray-900 dark:text-white truncate">
-                      {receipt.vendor}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center space-x-2">
+                      <div className="font-medium text-gray-900 dark:text-white truncate">
+                        {receipt.vendor}
+                      </div>
+                      {receipt.manually_edited && (
+                        <span 
+                          className="inline-flex items-center px-2 py-0.5 text-xs font-semibold bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded-full border border-amber-200 dark:border-amber-700"
+                          title="This receipt was manually edited by an admin"
+                        >
+                          <Shield className="h-3 w-3 mr-1" />
+                          Edited
+                        </span>
+                      )}
                     </div>
                     {receipt.description && (
                       <div className="text-gray-500 dark:text-gray-400 text-xs truncate mt-1">
@@ -227,6 +255,20 @@ export const EnhancedReceiptTable: React.FC<EnhancedReceiptTableProps> = ({
                   {receipt.status}
                 </span>
               </td>
+
+              {/* Actions Column - Admin Only */}
+              {isAdmin && (
+                <td className="py-4 px-4 text-center">
+                  <button
+                    onClick={(e) => handleEditClick(e, receipt)}
+                    className="inline-flex items-center px-3 py-1.5 bg-maroon-100 hover:bg-maroon-200 dark:bg-maroon-900/30 dark:hover:bg-maroon-900/50 text-maroon-700 dark:text-maroon-300 rounded-lg text-xs font-semibold transition-all transform hover:scale-105 border border-maroon-300 dark:border-maroon-700"
+                    title="Edit receipt data"
+                  >
+                    <Edit3 className="h-3.5 w-3.5 mr-1.5" />
+                    Edit
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

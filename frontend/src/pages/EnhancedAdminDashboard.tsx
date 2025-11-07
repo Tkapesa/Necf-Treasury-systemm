@@ -11,20 +11,26 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { 
-  RefreshCwIcon, 
-  DownloadIcon, 
-  PlusIcon, 
-  TrendingUpIcon, 
-  AlertCircleIcon,
-  DollarSignIcon,
-  CalendarIcon
+  RefreshCw, 
+  Download, 
+  Plus, 
+  TrendingUp, 
+  AlertCircle,
+  DollarSign,
+  Calendar,
+  Receipt as ReceiptIcon,
+  BarChart3,
+  ArrowUpRight,
+  
 } from 'lucide-react';
 
 import apiClient from '../api/client';
 import FilterBar, { FilterValues, FilterConfig } from '../components/FilterBar';
 import EnhancedReceiptModal from '../components/EnhancedReceiptModal';
+import EditReceiptModal from '../components/EditReceiptModal';
 import MainLayout from '../components/MainLayout';
 import EnhancedReceiptTable, { EnhancedReceiptData } from '../components/EnhancedReceiptTable';
+import { useAuth } from '../contexts/AuthContext';
 
 // Basic Receipt interface
 interface Receipt {
@@ -54,7 +60,9 @@ interface AdminStats {
 interface ReceiptWithUser extends Receipt {
   id: string;
   vendor?: string;
+  extracted_vendor?: string;
   amount?: number;
+  extracted_total?: number;
   date?: string;
   description?: string;
   category?: string;
@@ -78,6 +86,9 @@ interface ReceiptWithUser extends Receipt {
   purchase_date?: string;
   upload_date?: string;
   uploader_type?: string;
+  
+  // Admin edit tracking
+  manually_edited?: boolean;
 }
 
 interface ReceiptsResponse {
@@ -85,6 +96,7 @@ interface ReceiptsResponse {
 }
 
 export function EnhancedAdminDashboard() {
+  const { user } = useAuth();
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [receipts, setReceipts] = useState<ReceiptWithUser[]>([]);
   const [filters, setFilters] = useState<FilterValues>({});
@@ -92,6 +104,8 @@ export function EnhancedAdminDashboard() {
   const [receiptsLoading, setReceiptsLoading] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<ReceiptWithUser | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [receiptToEdit, setReceiptToEdit] = useState<ReceiptWithUser | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Filter configurations
@@ -173,15 +187,16 @@ export function EnhancedAdminDashboard() {
   // Load receipts
   const loadReceipts = useCallback(async (
     filterValues: FilterValues = filters,
-    sort: string = 'created_at',
+    sort: string = 'date',
     order: 'asc' | 'desc' = 'desc',
     page: number = 1
   ) => {
+    console.log('📥 loadReceipts called with:', { filterValues, sort, order, page });
     setReceiptsLoading(true);
     try {
       const params = new URLSearchParams({
         page: page.toString(),
-        limit: '20',
+        page_size: '20',
         sort_by: sort,
         sort_order: order,
         ...Object.entries(filterValues).reduce((acc, [key, value]) => {
@@ -201,6 +216,7 @@ export function EnhancedAdminDashboard() {
       });
 
       const response = await apiClient.get<ReceiptsResponse>(`/receipts?${params}`);
+      console.log('📊 Received receipts from API:', response.receipts?.length, 'receipts');
       setReceipts(response.receipts || []);
       setError(null);
     } catch (error) {
@@ -217,11 +233,43 @@ export function EnhancedAdminDashboard() {
     setModalOpen(true);
   };
 
+  // Handle edit click
+  const handleEditClick = (receipt: ReceiptWithUser) => {
+    setReceiptToEdit(receipt);
+    setEditModalOpen(true);
+  };
+
+  // Handle edit success - reload data without closing modal (modal closes itself)
+  const handleEditSuccess = async () => {
+    console.log('🔄 Reloading receipt data after edit...');
+    console.log('Current filters:', filters);
+    
+    try {
+      // Reload all data with current filters and sorting
+      await Promise.all([
+        loadReceipts(filters, 'date', 'desc', 1),
+        loadStats()
+      ]);
+      console.log('✅ Receipt data reloaded successfully');
+      console.log('Total receipts after reload:', receipts.length);
+    } catch (error) {
+      console.error('❌ Failed to reload data:', error);
+    }
+  };
+
   // Handle enhanced receipt click (converts back to ReceiptWithUser for compatibility)
   const handleEnhancedReceiptClick = (receipt: EnhancedReceiptData) => {
     const originalReceipt = receipts.find(r => r.id === receipt.id);
     if (originalReceipt) {
       handleReceiptClick(originalReceipt);
+    }
+  };
+
+  // Handle enhanced edit click (converts back to ReceiptWithUser for compatibility)
+  const handleEnhancedEditClick = (receipt: EnhancedReceiptData) => {
+    const originalReceipt = receipts.find(r => r.id === receipt.id);
+    if (originalReceipt) {
+      handleEditClick(originalReceipt);
     }
   };
 
@@ -277,8 +325,10 @@ export function EnhancedAdminDashboard() {
   const transformToEnhancedReceipts = (receipts: ReceiptWithUser[]): EnhancedReceiptData[] => {
     return receipts.map(receipt => ({
       id: receipt.id?.toString() || '',
-      vendor: receipt.vendor,
-      amount: receipt.amount,
+      vendor: receipt.extracted_vendor || receipt.vendor || 'N/A',
+      extracted_vendor: receipt.extracted_vendor,
+      amount: receipt.extracted_total || receipt.amount || 0,
+      extracted_amount: receipt.extracted_total,
       date: receipt.purchase_date || receipt.created_at,
       purchase_date: receipt.purchase_date,
       created_at: receipt.created_at,
@@ -293,7 +343,8 @@ export function EnhancedAdminDashboard() {
       image_url: receipt.image_url,
       event_purpose: receipt.event_purpose,
       purchaser_email: receipt.purchaser_email,
-      additional_notes: receipt.additional_notes
+      additional_notes: receipt.additional_notes,
+      manually_edited: receipt.manually_edited // Include the manually_edited flag
     }));
   };
 
@@ -311,7 +362,7 @@ export function EnhancedAdminDashboard() {
   }, [loadStats, loadReceipts]);
 
   useEffect(() => {
-    loadReceipts(filters, 'created_at', 'desc', 1);
+  loadReceipts(filters, 'date', 'desc', 1);
   }, [filters, loadReceipts]);
 
   if (loading) {
@@ -333,26 +384,28 @@ export function EnhancedAdminDashboard() {
       <div className="mb-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900 dark:text-white mb-2">Receipt Management</h1>
-            <p className="text-gray-600 dark:text-gray-400">All receipts in one searchable, filterable view</p>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent mb-2">
+              Receipt Management
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400 text-lg">All receipts in one searchable, filterable view</p>
           </div>
           <div className="flex items-center space-x-3">
             <button
               onClick={handleRefresh}
-              className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              className="inline-flex items-center px-5 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl text-sm font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 transform hover:scale-105 shadow-sm hover:shadow-md"
             >
-              <RefreshCwIcon className="w-4 h-4 mr-2" />
+              <RefreshCw className="w-4 h-4 mr-2" />
               Refresh
             </button>
             <button
               onClick={handleExport}
-              className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              className="inline-flex items-center px-5 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl text-sm font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 transform hover:scale-105 shadow-sm hover:shadow-md"
             >
-              <DownloadIcon className="w-4 h-4 mr-2" />
+              <Download className="w-4 h-4 mr-2" />
               Export
             </button>
-            <button className="bg-gray-900 dark:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 dark:hover:bg-gray-600 transition-colors">
-              <PlusIcon className="w-4 h-4 mr-2 inline" />
+            <button className="inline-flex items-center bg-gradient-to-r from-maroon-600 to-maroon-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:from-maroon-700 hover:to-maroon-800 transition-all duration-200 transform hover:scale-105 shadow-lg shadow-maroon-500/30 hover:shadow-xl hover:shadow-maroon-500/40">
+              <Plus className="w-4 h-4 mr-2" />
               New Receipt
             </button>
           </div>
@@ -362,52 +415,84 @@ export function EnhancedAdminDashboard() {
       {/* Statistics Cards */}
       {stats && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <DollarSignIcon className="h-8 w-8 text-green-600" />
+          {/* Total Amount Card */}
+          <div className="group relative bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 p-6 rounded-2xl border border-green-200/50 dark:border-green-700/50 hover:shadow-xl transition-all duration-300 transform hover:scale-105 overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-green-500/10 to-transparent rounded-full transform translate-x-16 -translate-y-16"></div>
+            <div className="relative flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-green-600 dark:text-green-400 mb-2">Total Amount</p>
+                <p className="text-3xl font-bold text-gray-900 dark:text-white">${stats.total_amount.toFixed(2)}</p>
+                <div className="flex items-center mt-2 text-xs text-green-600 dark:text-green-400">
+                  <ArrowUpRight className="h-3 w-3 mr-1" />
+                  <span className="font-semibold">+12.5% this month</span>
+                </div>
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Amount</p>
-                <p className="text-2xl font-semibold text-gray-900 dark:text-white">${stats.total_amount.toFixed(2)}</p>
+              <div className="flex-shrink-0">
+                <div className="p-4 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl shadow-lg group-hover:scale-110 transition-transform duration-300">
+                  <DollarSign className="h-8 w-8 text-green-600 dark:text-green-400" />
+                </div>
               </div>
             </div>
           </div>
           
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <DollarSignIcon className="h-8 w-8 text-blue-600" />
+          {/* Total Receipts Card */}
+          <div className="group relative bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 p-6 rounded-2xl border border-blue-200/50 dark:border-blue-700/50 hover:shadow-xl transition-all duration-300 transform hover:scale-105 overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-500/10 to-transparent rounded-full transform translate-x-16 -translate-y-16"></div>
+            <div className="relative flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 mb-2">Total Receipts</p>
+                <p className="text-3xl font-bold text-gray-900 dark:text-white">{stats.total_receipts}</p>
+                <div className="flex items-center mt-2 text-xs text-blue-600 dark:text-blue-400">
+                  <ArrowUpRight className="h-3 w-3 mr-1" />
+                  <span className="font-semibold">+8 new today</span>
+                </div>
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Receipts</p>
-                <p className="text-2xl font-semibold text-gray-900 dark:text-white">{stats.total_receipts}</p>
+              <div className="flex-shrink-0">
+                <div className="p-4 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl shadow-lg group-hover:scale-110 transition-transform duration-300">
+                  <ReceiptIcon className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <CalendarIcon className="h-8 w-8 text-purple-600" />
+          {/* This Month Card */}
+          <div className="group relative bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-900/20 dark:to-violet-900/20 p-6 rounded-2xl border border-purple-200/50 dark:border-purple-700/50 hover:shadow-xl transition-all duration-300 transform hover:scale-105 overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-purple-500/10 to-transparent rounded-full transform translate-x-16 -translate-y-16"></div>
+            <div className="relative flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-purple-600 dark:text-purple-400 mb-2">This Month</p>
+                <p className="text-3xl font-bold text-gray-900 dark:text-white">{stats.recent_activity.this_month}</p>
+                <div className="flex items-center mt-2 text-xs text-purple-600 dark:text-purple-400">
+                  <Calendar className="h-3 w-3 mr-1" />
+                  <span className="font-semibold">October 2025</span>
+                </div>
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">This Month</p>
-                <p className="text-2xl font-semibold text-gray-900 dark:text-white">{stats.recent_activity.this_month}</p>
+              <div className="flex-shrink-0">
+                <div className="p-4 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl shadow-lg group-hover:scale-110 transition-transform duration-300">
+                  <Calendar className="h-8 w-8 text-purple-600 dark:text-purple-400" />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <TrendingUpIcon className="h-8 w-8 text-indigo-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Avg Receipt</p>
-                <p className="text-2xl font-semibold text-gray-900 dark:text-white">
+          {/* Average Receipt Card */}
+          <div className="group relative bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-900/20 dark:to-blue-900/20 p-6 rounded-2xl border border-indigo-200/50 dark:border-indigo-700/50 hover:shadow-xl transition-all duration-300 transform hover:scale-105 overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-indigo-500/10 to-transparent rounded-full transform translate-x-16 -translate-y-16"></div>
+            <div className="relative flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 mb-2">Avg Receipt</p>
+                <p className="text-3xl font-bold text-gray-900 dark:text-white">
                   ${stats.total_receipts > 0 ? (stats.total_amount / stats.total_receipts).toFixed(2) : '0.00'}
                 </p>
+                <div className="flex items-center mt-2 text-xs text-indigo-600 dark:text-indigo-400">
+                  <BarChart3 className="h-3 w-3 mr-1" />
+                  <span className="font-semibold">Analytics ready</span>
+                </div>
+              </div>
+              <div className="flex-shrink-0">
+                <div className="p-4 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl shadow-lg group-hover:scale-110 transition-transform duration-300">
+                  <TrendingUp className="h-8 w-8 text-indigo-600 dark:text-indigo-400" />
+                </div>
               </div>
             </div>
           </div>
@@ -415,7 +500,7 @@ export function EnhancedAdminDashboard() {
       )}
 
       {/* Filters and Search */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 mb-6">
+      <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl border border-gray-200/50 dark:border-gray-700/50 p-6 mb-6 shadow-lg hover:shadow-xl transition-all duration-300">
         <FilterBar
           filters={filterConfigs}
           values={filters}
@@ -426,19 +511,25 @@ export function EnhancedAdminDashboard() {
 
       {/* Error Display */}
       {error && (
-        <div className="bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 rounded-lg p-4 mb-6">
+        <div className="bg-gradient-to-r from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20 border border-red-200 dark:border-red-700 rounded-2xl p-4 mb-6 shadow-lg animate-in slide-in-from-top-2 duration-300">
           <div className="flex items-center">
-            <AlertCircleIcon className="h-5 w-5 text-red-400 mr-2" />
-            <p className="text-red-700 dark:text-red-200">{error}</p>
+            <div className="flex-shrink-0">
+              <div className="p-2 bg-red-100 dark:bg-red-900/40 rounded-xl">
+                <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+              </div>
+            </div>
+            <p className="ml-3 text-sm font-semibold text-red-700 dark:text-red-300">{error}</p>
           </div>
         </div>
       )}
 
       {/* Enhanced Receipts Table */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl border border-gray-200/50 dark:border-gray-700/50 overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-300">
         <EnhancedReceiptTable
           receipts={enhancedReceipts}
           onReceiptClick={handleEnhancedReceiptClick}
+          onEdit={handleEnhancedEditClick}
+          userRole={user?.role}
         />
       </div>
 
@@ -451,6 +542,19 @@ export function EnhancedAdminDashboard() {
             setModalOpen(false);
             setSelectedReceipt(null);
           }}
+        />
+      )}
+
+      {/* Edit Receipt Modal */}
+      {editModalOpen && receiptToEdit && (
+        <EditReceiptModal
+          receipt={receiptToEdit}
+          isOpen={editModalOpen}
+          onClose={() => {
+            setEditModalOpen(false);
+            setReceiptToEdit(null);
+          }}
+          onSuccess={handleEditSuccess}
         />
       )}
     </MainLayout>
